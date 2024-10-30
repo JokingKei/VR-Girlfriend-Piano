@@ -6,48 +6,62 @@ using System.Collections.Generic;
 
 public class MidiFileReader : MonoBehaviour
 {
-    public GameObject notePrefab; // Prefab for falling notes
-    public string midiFilePath;   // Path to your .mid file
-    public float noteSpeed = 20f; // Speed at which the notes fall
-    public float spawnHeight = 10f; // Adjustable Y-height for notes when spawning
-    public float bpm = 90f; // Beats per minute for tempo adjustment
-    public AudioSource audioSource; // Audio source for playing note sounds
+    public GameObject notePrefab;
+    public string midiFilePath;
+    public float noteSpeed = 20f;
+    public float spawnHeight = 10f;
+    public float bpm = 90f;
+    public AudioSource audioSource;
 
     private Dictionary<int, Transform> pianoKeys = new Dictionary<int, Transform>();
     private TempoMap tempoMap;
+    private bool isPlaying = false;
+    private bool playAudio = true;
 
     void Start()
     {
-        // Automatically map the piano keys in the scene by name (Key_21 to Key_108)
         for (int i = 21; i <= 108; i++)
         {
             string keyName = "Key_" + i;
             Transform keyTransform = GameObject.Find(keyName)?.transform;
-
             if (keyTransform != null)
             {
                 pianoKeys.Add(i, keyTransform);
             }
-            else
-            {
-                Debug.LogWarning("Key " + keyName + " not found in the scene.");
-            }
         }
+    }
 
-        // Load the MIDI file
-        LoadMidiFile(midiFilePath);
+    public void PlayMidiFile()
+    {
+        if (!isPlaying)
+        {
+            isPlaying = true;
+            playAudio = true;
+            LoadMidiFile(midiFilePath);
+        }
+    }
+
+    public void PlayMidiFileWithoutAudio()
+    {
+        if (!isPlaying)
+        {
+            isPlaying = true;
+            playAudio = false;
+            LoadMidiFile(midiFilePath);
+        }
+    }
+
+    public void StopMidiPlayback()
+    {
+        isPlaying = false;
+        StopAllCoroutines();
     }
 
     void LoadMidiFile(string filePath)
     {
-        // Read the MIDI file and get its tempo map
         MidiFile midiFile = MidiFile.Read(filePath);
         tempoMap = midiFile.GetTempoMap();
-
-        // Get the notes from the MIDI file
         var notes = midiFile.GetNotes();
-
-        // Start spawning the notes from the MIDI data
         StartCoroutine(SpawnNotesFromMidi(notes));
     }
 
@@ -83,6 +97,8 @@ public class MidiFileReader : MonoBehaviour
         {
             SpawnNoteGroup(currentTimeGroup);
         }
+
+        isPlaying = false;
     }
 
     void SpawnNoteGroup(List<Note> noteGroup)
@@ -104,54 +120,47 @@ public class MidiFileReader : MonoBehaviour
                 if (fallingNote != null)
                 {
                     fallingNote.SetFallSpeed(noteSpeed);
-                    fallingNote.noteLength = noteLength; // Pass note duration to FallingNote
+                    fallingNote.noteLength = noteLength;
+                    fallingNote.playAudioOnHit = playAudio;
+                    fallingNote.audioSourceClip = audioSource.clip;
+                    fallingNote.midiNoteNumber = midiNoteNumber;
                 }
             }
         }
     }
 
-    // Method to play the note when it reaches the bottom of the screen
+    // Original audio playback logic for each note
     public void PlayAudioForNoteOnDestruction(int midiNoteNumber, double noteDuration)
     {
-        // Create a new GameObject with its own AudioSource to play the sound
         GameObject noteSoundObject = new GameObject("Note_" + midiNoteNumber);
         AudioSource noteAudioSource = noteSoundObject.AddComponent<AudioSource>();
-
         noteAudioSource.clip = audioSource.clip;
 
-        // Adjust the pitch based on the MIDI note number relative to C4 (MIDI note 60)
         float pitch = Mathf.Pow(2f, (midiNoteNumber - 60) / 12f);
         noteAudioSource.pitch = pitch;
 
-        // Play the note with fade-in
         noteAudioSource.volume = 0f;
         noteAudioSource.Play();
         StartCoroutine(FadeIn(noteAudioSource, 0.05f));
 
-        // Calculate note duration or max clip length
         float playDuration = Mathf.Min((float)noteDuration, noteAudioSource.clip.length / noteAudioSource.pitch);
-
-        // Stop the note with fade-out after it finishes
         StartCoroutine(StopNoteWithFadeOut(noteAudioSource, playDuration, 0.05f));
     }
 
     IEnumerator FadeIn(AudioSource audioSource, float fadeTime)
     {
         float startVolume = 0f;
-
         while (audioSource.volume < 1f)
         {
             audioSource.volume += Time.deltaTime / fadeTime;
             yield return null;
         }
-
         audioSource.volume = 1f;
     }
 
     IEnumerator StopNoteWithFadeOut(AudioSource audioSource, float playDuration, float fadeOutTime)
     {
         yield return new WaitForSeconds(playDuration);
-
         float startVolume = audioSource.volume;
 
         while (audioSource.volume > 0f)
@@ -159,7 +168,6 @@ public class MidiFileReader : MonoBehaviour
             audioSource.volume -= startVolume * Time.deltaTime / fadeOutTime;
             yield return null;
         }
-
         audioSource.Stop();
         Destroy(audioSource.gameObject);
     }
