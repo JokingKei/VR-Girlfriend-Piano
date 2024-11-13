@@ -1,0 +1,145 @@
+#include <Wire.h>
+#include <math.h>
+
+const int MPU = 0x68; // I2C address of the MPU-6050
+int16_t accel_X, accel_Y, accel_Z, Tmp, gyro_X, gyro_Y, gyro_Z; // 16-bit integers
+
+// Pins for flex sensors
+const int THUMB_PIN = 36;  // ESP32 pin for Thumb
+const int INDEX_PIN = 32;  // ESP32 pin for Index
+const int MIDDLE_PIN = 33; // ESP32 pin for Middle
+const int RING_PIN = 34;   // ESP32 pin for Ring
+const int PINKY_PIN = 35;  // ESP32 pin for Pinky
+
+const float Vin = 3.3; // Input Voltage for ESP32 (3.3V)
+const float R_DIV = 14000; // Measured resistance of R2
+const float NOMINAL_RES = 26000; // resistance when straight
+const float BENT_RES = 60000.0; // resistance at 90 deg
+
+// Calibration offsets
+int accel_X_offset = 0;
+int accel_Y_offset = 0;
+int accel_Z_offset = 0;
+int gyro_X_offset = 0;
+int gyro_Y_offset = 0;
+int gyro_Z_offset = 0;
+
+void setup() {
+  // Set the flex sensor pins as input
+  pinMode(THUMB_PIN, INPUT);
+  pinMode(PINKY_PIN, INPUT);
+  pinMode(MIDDLE_PIN, INPUT);
+  pinMode(INDEX_PIN, INPUT);
+  pinMode(RING_PIN, INPUT);
+
+  // Begin serial communication
+  Serial.begin(9600);
+  Wire.begin(21, 22); // ESP32 I2C SDA on pin 21, SCL on pin 22
+  initializeMPU();
+  calibrate(); // Calibrate to get initial 0 values
+}
+
+void loop() {
+  // Read the output of each flex sensor
+  flexSensor(THUMB_PIN, "Thumb", "Left");
+  flexSensor(INDEX_PIN, "Index", "Left");
+  flexSensor(RING_PIN, "Ring", "Left");
+  flexSensor(MIDDLE_PIN, "Middle", "Left");
+  flexSensor(RING_PIN, "Pinky", "Left");
+
+  // Read accel and gyro data
+  accel_and_gyro("Left");
+}
+
+// Read flex sensor data and convert it into an angle
+void flexSensor(int PIN, String finger, String hand) {
+  int voltage_read = analogRead(PIN);
+  float Vout = voltage_read * Vin / 1023.0;
+  float flex_resistance = R_DIV * (Vin / Vout - 1.0);
+
+  // Map resistance to angle
+  float angle = map(flex_resistance, NOMINAL_RES, BENT_RES, 0, 90.0);
+  
+  // Correction for thumb angle
+  //if (finger == "Thumb") {
+   // angle = angle - 50;
+ // }
+
+  // Print the angle
+  Serial.println(hand + ":" + finger + ":" + String(angle));
+}
+
+// Read accel and gyro data from the MPU6050
+void accel_and_gyro(String hand) {
+  Wire.beginTransmission(MPU); // Start transmission
+  Wire.write(0x3B); // First register for accelerometer data (0x3B is the starting register)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 14, true); // Request 14 registers for accel & gyro data
+
+  // Read accelerometer data (combine high and low bytes)
+  accel_X = Wire.read() << 8 | Wire.read();
+  accel_Y = Wire.read() << 8 | Wire.read();
+  accel_Z = Wire.read() << 8 | Wire.read();
+
+  // Read gyroscope data (combine high and low bytes)
+  gyro_X = Wire.read() << 8 | Wire.read();
+  gyro_Y = Wire.read() << 8 | Wire.read();
+  gyro_Z = Wire.read() << 8 | Wire.read();
+
+  // Apply calibration offsets to reset to zero
+  accel_X -= accel_X_offset;
+  accel_Y -= accel_Y_offset;
+  accel_Z -= accel_Z_offset;
+  gyro_X -= gyro_X_offset;
+  gyro_Y -= gyro_Y_offset;
+  gyro_Z -= -gyro_Z_offset;
+
+  // Send accelerometer and gyroscope data to Unity
+  Serial.println(hand + ":RotateX:" + String(gyro_X));
+  Serial.println(hand + ":RotateY:" + String(gyro_Y));
+  Serial.println(hand + ":RotateZ:" + String(gyro_Z));
+
+ // Serial.println(hand + ":TranslateX:" + String(accel_X));
+  //Serial.println(hand + ":TranslateY:" + String(accel_Y));
+  //Serial.println(hand + ":TranslateZ:" + String(accel_Z));
+
+ 
+}
+
+
+// Initialize the MPU6050 sensor
+void initializeMPU() {
+  Wire.beginTransmission(MPU);
+  Wire.write(0x6B);  // PWR_MGMT_1 register
+  Wire.write(0);     // Wake up the MPU6050
+  Wire.endTransmission(true);
+}
+
+// Calibrate the sensors
+// Calibrate accel and gyro from the initial readings of the data
+// Ensure that sensors are stationary at the start for better accuracy
+void calibrate() {
+  // Read initial accelerometer and gyroscope data to determine the offsets
+  int16_t raw_accel_X, raw_accel_Y, raw_accel_Z, raw_gyro_X, raw_gyro_Y, raw_gyro_Z;
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B); // Starting register for accelerometer
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 14, true);
+  raw_accel_X = Wire.read() << 8 | Wire.read();
+  raw_accel_Y = Wire.read() << 8 | Wire.read();
+  raw_accel_Z = Wire.read() << 8 | Wire.read();
+  raw_gyro_X = Wire.read() << 8 | Wire.read();
+  raw_gyro_Y = Wire.read() << 8 | Wire.read();
+  raw_gyro_Z = Wire.read() << 8 | Wire.read();
+
+  // Use the values from rest position to set as offsets
+  accel_X_offset = raw_accel_X;
+  accel_Y_offset = raw_accel_Y;
+  accel_Z_offset = raw_accel_Z;
+  gyro_X_offset = raw_gyro_X;
+  gyro_Y_offset = raw_gyro_Y;
+  gyro_Z_offset = raw_gyro_Z;
+
+  // Wait for the sensor to stabilize
+  
+}
